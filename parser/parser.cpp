@@ -3,37 +3,13 @@
 namespace parser {
   std::shared_ptr<ASTTypeSpec> parse_type_spec(Token **next, PError &err) {
     Token *t;
-    if ((t = expect_token_with_type(next, err, KwNum))) {
+    if ((t = expect_token_with_type(next, err, KwI64))) {
       return std::make_shared<ASTTypeSpec>(t);
     }
-    if ((t = expect_token_with_type(next, err, KwChar))) {
+    if ((t = expect_token_with_type(next, err, KwI8))) {
       return std::make_shared<ASTTypeSpec>(t);
     }
-    if ((t = expect_token_with_type(next, err, KwStruct))) {
-      std::shared_ptr<ASTTypeSpec> ret = std::make_shared<ASTTypeSpec>(t);
-      if (!(t = expect_token_with_type(next, err, Ident))) return nullptr;
-      ret->s = t;
-      return ret;
-    }
-    if ((t = expect_token_with_type(next, err, KwPtr))) {
-      std::shared_ptr<ASTTypeSpec> ret = std::make_shared<ASTTypeSpec>(t);
-      if (!expect_token_with_str(next, err, "<")) return nullptr;
-      if (!(ret->of = parse_type_spec(next, err))) return nullptr;
-      if (!expect_token_with_str(next, err, ">")) return nullptr;
-      return ret;
-    }
-    if ((t = expect_token_with_type(next, err, KwArray))) {
-      std::shared_ptr<ASTTypeSpec> ret = std::make_shared<ASTTypeSpec>(t);
-      if (!expect_token_with_str(next, err, "<")) return nullptr;
-      if (!(ret->of = parse_type_spec(next, err))) return nullptr;
-      if (!expect_token_with_str(next, err, ">")) return nullptr;
-      if (!expect_token_with_str(next, err, "[")) return nullptr;
-      if (!(t = expect_token_with_type(next, err, NumberConstant))) return nullptr;
-      ret->size = std::stoi(std::string(t->sv));
-      if (!expect_token_with_str(next, err, "]")) return nullptr;
-      return ret;
-    }
-    if ((t = expect_token_with_type(next, err, KwFuncptr))) {
+    if ((t = expect_token_with_type(next, err, KwFn))) {
       std::shared_ptr<ASTTypeSpec> ret = std::make_shared<ASTTypeSpec>(t);
       if (!expect_token_with_str(next, err, "(")) return nullptr;
       while (!expect_token_with_str(next, err, ")")) {
@@ -47,13 +23,28 @@ namespace parser {
       }
       // token "->" should be here
       if (!expect_token_with_str(next, err, "->")) return nullptr;
-      if (!(ret->type_spec = parse_type_spec(next, err))) return nullptr;
+      if (!(ret->ret_type = parse_type_spec(next, err))) return nullptr;
+      return ret;
+    }
+    if ((t = expect_token_with_type(next, err, Ident))) {
+      std::shared_ptr<ASTTypeSpec> ret = std::make_shared<ASTTypeSpec>(t);
+      if (expect_token_with_str(next, err, "<")) {
+        std::shared_ptr<ASTTypeSpec> type;
+        while (!expect_token_with_str(next, err, ">")) {
+          if (!(type = parse_type_spec(next, err))) return nullptr;
+          ret->templates.push_back(type);
+          if (expect_token_with_str(next, err, ",")) continue;
+          // end
+          if (!expect_token_with_str(next, err, ">")) return nullptr;
+          break;
+        }
+      }
       return ret;
     }
     return nullptr;
   }
 
-  std::shared_ptr<ASTTypeSpec> parse_declaration_spec(Token **next, PError &err) {
+  std::shared_ptr<ASTTypeSpec> parse_dtion_spec(Token **next, PError &err) {
     // TODO static
     return parse_type_spec(next, err);
   }
@@ -66,7 +57,8 @@ namespace parser {
       std::shared_ptr<ASTPrimaryExpr> ret = std::make_shared<ASTPrimaryExpr>();
       if (!(ret->expr = parse_expr(next, err))) return nullptr;
       if (expect_token_with_str(next, err, ")")) return ret;
-    } else if ((t = expect_token_with_type(next, err, NumberConstant)) ||
+    } else if ((t = expect_token_with_type(next, err, I64Constant)) ||
+               (t = expect_token_with_type(next, err, I8Literal)) ||
                (t = expect_token_with_type(next, err, StringLiteral)) ||
                (t = expect_token_with_type(next, err, Ident))) {
       return std::make_shared<ASTSimpleExpr>(t);
@@ -77,15 +69,53 @@ namespace parser {
   std::shared_ptr<ASTExpr> parse_assign_expr(Token **next, PError &err);
 
   std::shared_ptr<ASTExpr> parse_postfix_expr(Token **next, PError &err) {
-  // ->
+  // ()
+  // []
   // .
     std::shared_ptr<ASTExpr> ret = parse_primary_expr(next, err);
-    Token *t;
+    Token *t, *saved;
     while (ret) {
+      saved = *next;
+      if ((t = expect_token_with_str(next, err, "["))) {
+        // now it is vec-access-expr
+        std::shared_ptr<ASTIndexAccessExpr> aa = std::make_shared<ASTIndexAccessExpr>(t);
+        aa->p = ret;
+        aa->expr = parse_expr(next, err);
+        ret = aa;
+        if (!expect_token_with_str(next, err, "]")) return nullptr;
+        continue;
+      }
+      if (expect_token_with_str(next, err, ".")) {
+        Token *t = expect_token_with_type(next, err, Ident);
+        if (!t) return nullptr;
+        // now it is st-access-expr
+        std::shared_ptr<ASTStAccessExpr> sa = std::make_shared<ASTStAccessExpr>(t);
+        sa->p = ret;
+        ret = sa;
+        continue;
+      }
+      bool has_template = false;
+      std::vector<std::shared_ptr<ASTTypeSpec>> templates;
+      if (expect_token_with_str(next, err, "<")) {
+        has_template = true;
+        std::shared_ptr<ASTTypeSpec> type;
+        while (!expect_token_with_str(next, err, ">")) {
+          if (!(type = parse_type_spec(next, err))) return nullptr;
+          templates.push_back(type);
+          if (expect_token_with_str(next, err, ",")) continue;
+          // end
+          if (!expect_token_with_str(next, err, ">")) {
+            *next = saved;
+            return ret;
+          }
+          break;
+        }
+      }
       if ((t = expect_token_with_str(next, err, "("))) {
-        // now it is function-call-expr
-        std::shared_ptr<ASTFuncCallExpr> fc = std::make_shared<ASTFuncCallExpr>(t);
-        fc->primary = ret;
+        // now it is fntion-call-expr
+        std::shared_ptr<ASTFnCallExpr> fc = std::make_shared<ASTFnCallExpr>(t);
+        fc->p = ret;
+        fc->templates = templates;
         std::shared_ptr<ASTExpr> arg;
         while (!expect_token_with_str(next, err, ")")) {
           if (!(arg = parse_assign_expr(next, err))) return nullptr;
@@ -98,37 +128,20 @@ namespace parser {
         ret = fc;
         continue;
       }
-      if ((t = expect_token_with_str(next, err, "["))) {
-        // now it is array-access-expr
-        std::shared_ptr<ASTArrayAccessExpr> aa = std::make_shared<ASTArrayAccessExpr>(t);
-        aa->primary = ret;
-        aa->expr = parse_expr(next, err);
-        ret = aa;
-        if (!expect_token_with_str(next, err, "]")) return nullptr;
-        continue;
-      }
-      if (expect_token_with_str(next, err, ".")) {
-        Token *t = expect_token_with_type(next, err, Ident);
-        if (!t) return nullptr;
-        // now it is struct-access-expr
-        std::shared_ptr<ASTStructAccessExpr> sa = std::make_shared<ASTStructAccessExpr>(t);
-        sa->primary = ret;
-        ret = sa;
-        continue;
-      }
+      if (has_template) return nullptr;
       break;
     }
     return ret;
   }
 
   std::shared_ptr<ASTExpr> parse_unary_expr(Token **next, PError &err) {
-    Token *t;
-    if ((t = expect_token_with_str(next, err, "*")) ||
-        (t = expect_token_with_str(next, err, "&"))) {
-      std::shared_ptr<ASTUnaryExpr> ret = std::make_shared<ASTUnaryExpr>(t);
-      ret->expr = parse_unary_expr(next, err);
-      return ret;
-    }
+    // Token *t;
+    // if ((t = expect_token_with_str(next, err, "*")) ||
+    //     (t = expect_token_with_str(next, err, "&"))) {
+    //   std::shared_ptr<ASTUnaryExpr> ret = std::make_shared<ASTUnaryExpr>(t);
+    //   ret->expr = parse_unary_expr(next, err);
+    //   return ret;
+    // }
     return parse_postfix_expr(next, err);
   }
 
@@ -289,42 +302,40 @@ namespace parser {
   std::shared_ptr<ASTExprStmt> parse_expr_stmt(Token **next, PError &err) {
     std::shared_ptr<ASTExprStmt> ret = std::make_shared<ASTExprStmt>();
     if (!(ret->expr = parse_expr(next, err))) return nullptr;
-    if (!expect_token_with_str(next, err, "\n")) return nullptr;
+    if (!expect_token_with_str(next, err, ";")) return nullptr;
     return ret;
   }
 
-  std::shared_ptr<ASTDeclarator> parse_declarator(Token **next, PError &err) {
+  std::shared_ptr<ASTDeclarator> parse_dtor(Token **next, PError &err) {
     Token *t = expect_token_with_type(next, err, Ident);
     if (!t) return nullptr;
     return std::make_shared<ASTDeclarator>(t);
   }
 
-  std::shared_ptr<ASTDeclaration> parse_declaration(Token **next, PError &err) {
+  std::shared_ptr<ASTDeclaration> parse_dtion(Token **next, PError &err) {
     std::shared_ptr<ASTDeclaration> ret = std::make_shared<ASTDeclaration>();
-    if (!(ret->declaration_spec = parse_declaration_spec(next, err))) return nullptr;
+    if (!(ret->dtion_spec = parse_dtion_spec(next, err))) return nullptr;
 
-    std::shared_ptr<ASTDeclarator> declarator;
-    while ((declarator = parse_declarator(next, err))) {
-      ret->declarators.push_back(declarator);
+    std::shared_ptr<ASTDeclarator> dtor;
+    while ((dtor = parse_dtor(next, err))) {
+      ret->dtors.push_back(dtor);
       if (expect_token_with_str(next, err, ",")) continue;
-      // declaration end
-      if (expect_token_with_str(next, err, "\n")) return ret;
-      break;
+      return ret;
     }
     return nullptr;
   }
 
-  std::shared_ptr<ASTSimpleDeclaration> parse_simple_declaration(Token **next, PError &err) {
-  // type-specifier declarator
+  std::shared_ptr<ASTSimpleDeclaration> parse_simple_dtion(Token **next, PError &err) {
+  // type-specifier dtor
     std::shared_ptr<ASTSimpleDeclaration> ret = std::make_shared<ASTSimpleDeclaration>();
     if (!(ret->type_spec = parse_type_spec(next, err))) return nullptr;
-    if (!(ret->declarator = parse_declarator(next, err))) return nullptr;
+    if (!(ret->dtor = parse_dtor(next, err))) return nullptr;
     return ret;
   }
 
-  std::shared_ptr<ASTCompoundStmt> parse_comp_stmt(Token **next, PError &err, int indents);
+  std::shared_ptr<ASTCompoundStmt> parse_comp_stmt(Token **next, PError &err);
 
-  std::shared_ptr<ASTElseStmt> parse_else_stmt(Token **next, PError &err, int indents) {
+  std::shared_ptr<ASTElseStmt> parse_else_stmt(Token **next, PError &err) {
     Token *t;
     std::shared_ptr<ASTExpr> expr;
     if ((t = expect_token_with_type(next, err, KwElif))) {
@@ -334,80 +345,62 @@ namespace parser {
     }
     std::shared_ptr<ASTElseStmt> ret = std::make_shared<ASTElseStmt>(t);
     ret->cond = expr;
-    if (!expect_token_with_str(next, err, "\n")) return nullptr;
-    if (!(ret->true_stmt = parse_comp_stmt(next, err, indents + 2))) return nullptr;
-    Token *saved_token = *next;
-    if (!consume_token_with_indents(next, indents) ||
-        !(ret->false_stmt = parse_else_stmt(next, err, indents))
-    ) {
-      *next = saved_token;
-      return ret;
-    }
+    if (!(ret->true_stmt = parse_comp_stmt(next, err))) return nullptr;
+    ret->false_stmt = parse_else_stmt(next, err);
     return ret;
   }
 
-  std::shared_ptr<AST> parse_stmt(Token **next, PError &err, int indents) {
+  std::shared_ptr<AST> parse_stmt(Token **next, PError &err) {
     Token *t;
     if ((t = expect_token_with_type(next, err, KwBreak))) {
-      if (!expect_token_with_str(next, err, "\n")) return nullptr;
+      if (!expect_token_with_str(next, err, ";")) return nullptr;
       return std::make_shared<ASTBreakStmt>(t);
     }
     if ((t = expect_token_with_type(next, err, KwContinue))) {
-      if (!expect_token_with_str(next, err, "\n")) return nullptr;
+      if (!expect_token_with_str(next, err, ";")) return nullptr;
       return std::make_shared<ASTContinueStmt>(t);
     }
     if ((t = expect_token_with_type(next, err, KwReturn))) {
       std::shared_ptr<ASTReturnStmt> ret = std::make_shared<ASTReturnStmt>(t);
       if (!(ret->expr = parse_expr(next, err))) return nullptr;
-      if (!expect_token_with_str(next, err, "\n")) return nullptr;
+      if (!expect_token_with_str(next, err, ";")) return nullptr;
       return ret;
     }
     if ((t = expect_token_with_type(next, err, KwIf))) {
       std::shared_ptr<ASTIfStmt> ret = std::make_shared<ASTIfStmt>(t);
       if (!(ret->cond = parse_expr(next, err))) return nullptr;
-      if (!expect_token_with_str(next, err, "\n")) return nullptr;
-      if (!(ret->true_stmt = parse_comp_stmt(next, err, indents + 2))) return nullptr;
-      Token *saved_token1 = *next, *saved_token2;
-      if (!consume_token_with_indents(next, indents)) {
-        *next = saved_token1;
-        return ret;
-      }
-      saved_token2 = *next;
-      if (!(ret->false_stmt = parse_else_stmt(next, err, indents))) {
-        if (*next != saved_token2) return nullptr;
-        *next = saved_token1;
-        return ret;
+      if (!(ret->true_stmt = parse_comp_stmt(next, err))) return nullptr;
+      Token *saved = *next;
+      if (!(ret->false_stmt = parse_else_stmt(next, err))) {
+        if (*next != saved) return nullptr;
       }
       return ret;
     }
-    if ((t = expect_token_with_type(next, err, KwLoop))) {
-      std::shared_ptr<ASTLoopStmt> ret = std::make_shared<ASTLoopStmt>(t);
+    if ((t = expect_token_with_type(next, err, KwWhile))) {
+      std::shared_ptr<ASTWhileStmt> ret = std::make_shared<ASTWhileStmt>(t);
       if (!(ret->cond = parse_expr(next, err))) return nullptr;
-      if (!expect_token_with_str(next, err, "\n")) return nullptr;
-      if (!(ret->true_stmt = parse_comp_stmt(next, err, indents + 2))) return nullptr;
+      if (!(ret->body = parse_comp_stmt(next, err))) return nullptr;
       return ret;
     }
     return parse_expr_stmt(next, err);
   }
 
-  std::shared_ptr<ASTCompoundStmt> parse_comp_stmt(Token **next, PError &err, int indents) {
-    std::shared_ptr<ASTCompoundStmt> ret = std::make_shared<ASTCompoundStmt>();
+  std::shared_ptr<ASTCompoundStmt> parse_comp_stmt(Token **next, PError &err) {
     std::shared_ptr<AST> item;
+    Token *t;
+    if (!(t = expect_token_with_str(next, err, "{"))) return nullptr;
+    std::shared_ptr<ASTCompoundStmt> ret = std::make_shared<ASTCompoundStmt>(t);
     while (1) {
-      if (!consume_token_with_indents(next, indents)) {
-        if (!*next || (*next)->sv.front() != ' ' ||
-            (int)(*next)->sv.length() < indents) {
-          // compound-stmt end
-          return ret;
-        } else {
-        // inner compound-stmt
-          if (!(item = parse_comp_stmt(next, err, indents + 2))) break;
-        }
+      if (expect_token_with_str(next, err, "}")) return ret;
+      if (!*next || (*next)->sv == "{") {
+        if (!(item = parse_comp_stmt(next, err))) break;
       } else {
-        Token *saved_token = *next;
-        if (!(item = parse_declaration(next, err))) {
-          if (saved_token != *next ||
-              !(item = parse_stmt(next, err, indents))) break;
+        t = *next;
+        if ((item = parse_dtion(next, err))) {
+          if (!expect_token_with_str(next, err, ";")) break;
+        } else {
+          *next = t;
+          if (!(item = parse_stmt(next, err))) break;
         }
       }
       ret->items.push_back(item);
@@ -415,19 +408,32 @@ namespace parser {
     return nullptr;
   }
 
-  std::shared_ptr<ASTFuncDeclarator> parse_func_declarator(Token **next, PError &err) {
-  // declarator(declaration, ...)
-  std::shared_ptr<ASTDeclarator> d;
+  std::shared_ptr<ASTFnDeclarator> parse_fn_dtor(Token **next, PError &err) {
+  // dtor(dtion, ...)
+    std::shared_ptr<ASTDeclarator> d;
+    std::vector<std::shared_ptr<ASTDeclarator>> templates;
     Token *t;
-    if (!(d = parse_declarator(next, err))) return nullptr;
+    if (!(d = parse_dtor(next, err))) return nullptr;
+    if (expect_token_with_str(next, err, "<")) {
+      std::shared_ptr<ASTDeclarator> t;
+      while (!expect_token_with_str(next, err, ">")) {
+        if (!(t = parse_dtor(next, err))) return nullptr;
+        templates.push_back(t);
+        if (expect_token_with_str(next, err, ",")) continue;
+        // end
+        if (!expect_token_with_str(next, err, ">")) return nullptr;
+        break;
+      }
+    }
     if (!(t = expect_token_with_str(next, err, "("))) return nullptr;
-    std::shared_ptr<ASTFuncDeclarator> ret = std::make_shared<ASTFuncDeclarator>(t);
-    ret->declarator = d;
+    std::shared_ptr<ASTFnDeclarator> ret = std::make_shared<ASTFnDeclarator>(t);
+    ret->dtor = d;
+    ret->templates = templates;
 
-    std::shared_ptr<ASTSimpleDeclaration> declaration;
+    std::shared_ptr<ASTSimpleDeclaration> dtion;
     while (!expect_token_with_str(next, err, ")")) {
-      if (!(declaration = parse_simple_declaration(next, err))) return nullptr;
-      ret->args.push_back(declaration);
+      if (!(dtion = parse_simple_dtion(next, err))) return nullptr;
+      ret->args.push_back(dtion);
       if (expect_token_with_str(next, err, ",")) continue;
       // end
       if (!expect_token_with_str(next, err, ")")) return nullptr;
@@ -436,88 +442,101 @@ namespace parser {
     return ret;
   }
 
-  std::shared_ptr<ASTFuncDeclaration> parse_func_declaration(Token **next, PError &err) {
-  // func-declarator -> type
-    std::shared_ptr<ASTFuncDeclaration> ret = std::make_shared<ASTFuncDeclaration>();
-    if (!(ret->declarator = parse_func_declarator(next, err))) return nullptr;
-    // token "->" should be here
-    if (!expect_token_with_str(next, err, "->")) return nullptr;
-    if (!(ret->type_spec = parse_type_spec(next, err))) return nullptr;
-    // token LF should be here
-    if (!expect_token_with_str(next, err, "\n")) return nullptr;
+  std::shared_ptr<ASTFnDeclaration> parse_fn_dtion(Token **next, PError &err) {
+  // fn-dtor -> type
+    std::shared_ptr<ASTFnDeclaration> ret = std::make_shared<ASTFnDeclaration>();
+    if (!(ret->dtor = parse_fn_dtor(next, err))) return nullptr;
+    if (expect_token_with_str(next, err, "->")) {
+      if (!(ret->ret_type = parse_type_spec(next, err))) return nullptr;
+    }
     return ret;
   }
 
-  std::shared_ptr<ASTFuncDef> parse_func_def(Token **next, PError &err) {
-  // func-declaration compound-stmt
-    if (!expect_token_with_type(next, err, KwFunc)) return nullptr;
-    std::shared_ptr<ASTFuncDef> ret = std::make_shared<ASTFuncDef>();
-    if (!(ret->declaration = parse_func_declaration(next, err))) return nullptr;
-    if (!(ret->body = parse_comp_stmt(next, err, 2))) return nullptr;
+  std::shared_ptr<ASTFnDef> parse_fn_def(Token **next, PError &err) {
+  // fn-dtion compound-stmt
+    if (!expect_token_with_type(next, err, KwFn)) return nullptr;
+    std::shared_ptr<ASTFnDef> ret = std::make_shared<ASTFnDef>();
+    if (!(ret->dtion = parse_fn_dtion(next, err))) return nullptr;
+    if (!(ret->body = parse_comp_stmt(next, err))) return nullptr;
     return ret;
   }
 
-  std::shared_ptr<ASTStructDef> parse_struct_def(Token **next, PError &err) {
-  // struct-declaration declaration LF declaration LF ...
-    Token *saved = *next;
-    if (!expect_token_with_type(next, err, KwStruct)) return nullptr;
-    std::shared_ptr<ASTStructDef> ret = std::make_shared<ASTStructDef>();
-    if (!(ret->declarator = parse_declarator(next, err))) return nullptr;
-    if (!expect_token_with_str(next, err, "\n")) {
+  std::shared_ptr<ASTMethodDef> parse_method_def(Token **next, PError &err) {
+  // fn-dtion compound-stmt
+    std::shared_ptr<ASTMethodDef> ret = std::make_shared<ASTMethodDef>();
+    if (!(ret->dtion = parse_fn_dtion(next, err))) return nullptr;
+    if (!(ret->body = parse_comp_stmt(next, err))) return nullptr;
+    return ret;
+  }
+
+  std::shared_ptr<ASTStDef> parse_st_def(Token **next, PError &err) {
+    if (!expect_token_with_type(next, err, KwSt)) return nullptr;
+    std::shared_ptr<ASTStDef> ret = std::make_shared<ASTStDef>();
+    if (!(ret->dtor = parse_dtor(next, err))) return nullptr;
+    if (expect_token_with_str(next, err, "<")) {
+      std::shared_ptr<ASTDeclarator> t;
+      while (!expect_token_with_str(next, err, ">")) {
+        if (!(t = parse_dtor(next, err))) return nullptr;
+        ret->templates.push_back(t);
+        if (expect_token_with_str(next, err, ",")) continue;
+        // end
+        if (!expect_token_with_str(next, err, ">")) return nullptr;
+        break;
+      }
+    }
+    if (!expect_token_with_str(next, err, "{")) return nullptr;
+    Token *saved;
+    std::shared_ptr<ASTMethodDef> method;
+    std::shared_ptr<ASTSimpleDeclaration> dtion;
+    while (*next) {
+      if (expect_token_with_str(next, err, "}") && ret->dtions.size()) {
+        return ret;
+      }
+      saved = *next;
+      if ((dtion = parse_simple_dtion(next, err))) {
+        ret->dtions.push_back(dtion);
+        if (!expect_token_with_str(next, err, ";")) return nullptr;
+        continue;
+      }
       *next = saved;
-      return nullptr;
-    }
-    if (!consume_token_with_indents(next, 2)) return nullptr;
-
-    std::shared_ptr<ASTSimpleDeclaration> declaration;
-    while ((declaration = parse_simple_declaration(next, err))) {
-      ret->declarations.push_back(declaration);
-      if (!expect_token_with_str(next, err, "\n")) return nullptr;
-      if (!consume_token_with_indents(next, 2)) return ret;
-    }
-    return nullptr;
-  }
-
-  std::shared_ptr<ASTExternalDeclaration> parse_external_declaration(Token **next, PError &err) {
-    std::shared_ptr<ASTExternalDeclaration> ret = std::make_shared<ASTExternalDeclaration>();
-    if (!(ret->declaration_spec = parse_declaration_spec(next, err))) return nullptr;
-
-    std::shared_ptr<ASTDeclarator> declarator;
-    while ((declarator = parse_declarator(next, err))) {
-      ret->declarators.push_back(declarator);
-      if (expect_token_with_str(next, err, ",")) continue;
-      // declaration end
-      if (expect_token_with_str(next, err, "\n")) return ret;
+      if ((method = parse_method_def(next, err))) {
+        ret->methods.push_back(method);
+        continue;
+      }
       break;
     }
     return nullptr;
   }
 
-  std::shared_ptr<ASTFfi> parse_ffi_declaration(Token **next, PError &err) {
-    std::shared_ptr<ASTFfi> ret = std::make_shared<ASTFfi>();
-    if (!expect_token_with_type(next, err, KwFfi)) return nullptr;
-    if (!expect_token_with_str(next, err, "\"C\"")) return nullptr;
-    if (!(ret->declarator = parse_declarator(next, err))) return nullptr;
-    if (!expect_token_with_str(next, err, "\n")) return nullptr;
-    return ret;
+  std::shared_ptr<ASTExternalDeclaration> parse_external_dtion(Token **next, PError &err) {
+    std::shared_ptr<ASTExternalDeclaration> ret = std::make_shared<ASTExternalDeclaration>();
+    if (!(ret->dtion_spec = parse_dtion_spec(next, err))) return nullptr;
+
+    std::shared_ptr<ASTDeclarator> dtor;
+    while ((dtor = parse_dtor(next, err))) {
+      ret->dtors.push_back(dtor);
+      if (expect_token_with_str(next, err, ",")) continue;
+      // dtion end
+      if (expect_token_with_str(next, err, ";")) return ret;
+      break;
+    }
+    return nullptr;
   }
 
   std::shared_ptr<ASTTranslationUnit> parse_translation_unit(Token **next, PError &err) {
     std::shared_ptr<ASTTranslationUnit> ret = std::make_shared<ASTTranslationUnit>();
 
-    std::shared_ptr<AST> external_declaration;
+    std::shared_ptr<AST> external_dtion;
     Token *saved;
     while (*next) {
       saved = *next;
-      external_declaration = parse_ffi_declaration(next, err);
-      if (!external_declaration && saved != *next) return nullptr;
-      if (!external_declaration) external_declaration = parse_struct_def(next, err);
-      if (!external_declaration && saved != *next) return nullptr;
-      if (!external_declaration) external_declaration = parse_func_def(next, err);
-      if (!external_declaration && saved != *next) return nullptr;
-      if (!external_declaration) external_declaration = parse_external_declaration(next, err);
-      if (!external_declaration) return nullptr;
-      ret->external_declarations.push_back(external_declaration);
+      external_dtion = parse_st_def(next, err);
+      if (!external_dtion && saved != *next) return nullptr;
+      if (!external_dtion) external_dtion = parse_fn_def(next, err);
+      if (!external_dtion && saved != *next) return nullptr;
+      if (!external_dtion) external_dtion = parse_external_dtion(next, err);
+      if (!external_dtion) return nullptr;
+      ret->external_dtions.push_back(external_dtion);
     }
     return ret;
   }
@@ -534,16 +553,9 @@ namespace parser {
     }
     // set new head_token
     *head_token = next;
-    // remove first LF punctuator
-    if (*head_token) {
-      t = consume_token_with_str(head_token, "\n");
-      if (!t) delete t;
-    }
     // *head_token can be NULL
-    next = *head_token;
     while (next) {
       bef = next;
-      assert(bef->type != Delimiter);
       next = bef->next;
       while (next) {
         // if next token is Delimiter, remove it and continue

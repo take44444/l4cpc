@@ -1,0 +1,61 @@
+
+st Node<T> {
+  T val;
+  Node<T> next;
+
+  new(T v) {
+    val: v;
+  }
+}
+
+st LinkedList<T> {
+  Node<T> head;
+  Node<T> tail;
+
+  new() {
+    Node<T> h;
+    head: h;
+    tail: h;
+  }
+
+  push(T v) {
+    Node<T> t;
+    t.new(v);
+    tail.next: t;
+    tail: t;
+  }
+
+  print() {
+    Node<T> tmp;
+    tmp: head.next;
+    while tmp {
+      print(tmp.v);
+      tmp: tmp.next;
+    }
+  }
+}
+
+fn binary_search(vec<i64> v, i64 x) -> i64 {
+  i64 l, r, mid;
+  l: 0-1;
+  r: v.len;
+  while r - l > 1 {
+    mid: (l + r) / 2;
+    if v[mid] >= x {
+      r: mid;
+    } else {
+      l: mid;
+    }
+    return r;
+  }
+}
+
+fn main() -> i64 {
+  i64 i, n;
+  input(n);
+  vec<i64> v;
+  v.new(n);
+  while i < n {
+    input(v[(i: i + 1) - 1]);
+  }
+}

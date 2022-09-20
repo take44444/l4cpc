@@ -3,7 +3,7 @@ ESC=$(printf '\033')
 make
 rm -f ./$1/result/*
 rm -f $2.S
-cat $2.l4t | ./l4tc 1> $2.S
+cat $2.l4cp | ./l4cpc 1> $2.S
 gcc-9 -o $2 $2.S
 testcases=`ls ./$1/in/`
 TIMEFORMAT='%R'

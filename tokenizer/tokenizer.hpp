@@ -5,26 +5,24 @@
 namespace tokenizer {
   enum TokenType {
     Delimiter,      // space
-    Punctuator,     // , ( ) + <- -> = > & * | && || \n
-    NumberConstant, // 0 3 0x07 0b10
+    I8Literal,      // 'a'
+    I64Constant,    // 0 3 0x07 0b10
+    Punctuator,     // , ( ) + { } -> = > & * | && || :
     StringLiteral,  // "hello world"
     Ident,          // vAr_n4m3
-    KwArray,
     KwBreak,        // break
-    KwChar,
     KwContinue,     // continue
     KwElif,         // elif
     KwElse,         // else
-    KwFfi,
-    KwFunc,         // func
-    KwFuncptr,      // funcptr
+    KwFn,           // fn
+    KwI8,           // i8
+    KwI64,          // i64
     KwIf,           // if
-    KwLoop,         // loop
-    KwNullptr,      // nullptr
-    KwNum,          // num
-    KwPtr,          // ptr
+    KwNil,          // nil
+    KwRep,          // rep
     KwReturn,       // return
-    KwStruct,       // struct
+    KwSt,           // st
+    KwWhile,        // while
     // Unexpected Token
     Unknown,        // unknown
   };

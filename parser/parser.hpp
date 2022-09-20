@@ -39,15 +39,12 @@ namespace parser {
   class ASTTypeSpec : public AST {
     public:
     Token *op;
-    std::shared_ptr<ASTTypeSpec> of;
-    int size;
+    std::vector<std::shared_ptr<ASTTypeSpec>> templates;
     std::vector<std::shared_ptr<ASTTypeSpec>> args;
-    std::shared_ptr<ASTTypeSpec> type_spec;
-    Token *s;
+    std::shared_ptr<ASTTypeSpec> ret_type;
     ASTTypeSpec(Token *t) : AST(), op(t) {
-      of = nullptr;
-      type_spec = nullptr;
-      size = 0;
+      templates = std::vector<std::shared_ptr<ASTTypeSpec>>();
+      ret_type = nullptr;
     }
   };
 
@@ -78,29 +75,31 @@ namespace parser {
     ASTUnaryExpr(Token *t) : ASTExpr(), op(t) {}
   };
 
-  class ASTFuncCallExpr : public ASTExpr {
+  class ASTFnCallExpr : public ASTExpr {
     public:
-    std::shared_ptr<ASTExpr> primary;
+    std::shared_ptr<ASTExpr> p;
+    std::vector<std::shared_ptr<ASTTypeSpec>> templates;
     std::vector<std::shared_ptr<ASTExpr>> args;
     Token *op;
-    ASTFuncCallExpr(Token *t) : ASTExpr(), op(t) {
+    ASTFnCallExpr(Token *t) : ASTExpr(), op(t) {
+      templates = std::vector<std::shared_ptr<ASTTypeSpec>>();
       args = std::vector<std::shared_ptr<ASTExpr>>();
     }
   };
 
-  class ASTArrayAccessExpr : public ASTExpr {
+  class ASTIndexAccessExpr : public ASTExpr {
     public:
-    std::shared_ptr<ASTExpr> primary;
+    std::shared_ptr<ASTExpr> p;
     std::shared_ptr<ASTExpr> expr;
     Token *op;
-    ASTArrayAccessExpr(Token *t) : ASTExpr(), op(t) {}
+    ASTIndexAccessExpr(Token *t) : ASTExpr(), op(t) {}
   };
 
-  class ASTStructAccessExpr : public ASTExpr {
+  class ASTStAccessExpr : public ASTExpr {
     public:
-    std::shared_ptr<ASTExpr> primary;
+    std::shared_ptr<ASTExpr> p;
     Token *op;
-    ASTStructAccessExpr(Token *t) : ASTExpr(), op(t) {}
+    ASTStAccessExpr(Token *t) : ASTExpr(), op(t) {}
   };
 
   class ASTMultiplicativeExpr : public ASTExpr {
@@ -199,30 +198,25 @@ namespace parser {
 
   class ASTDeclaration : public AST {
     public:
-    std::shared_ptr<ASTTypeSpec> declaration_spec;
-    std::vector<std::shared_ptr<ASTDeclarator>> declarators;
+    std::shared_ptr<ASTTypeSpec> dtion_spec;
+    std::vector<std::shared_ptr<ASTDeclarator>> dtors;
     ASTDeclaration() : AST() {
-      declarators = std::vector<std::shared_ptr<ASTDeclarator>>();
+      dtors = std::vector<std::shared_ptr<ASTDeclarator>>();
     }
   };
 
   class ASTSimpleDeclaration : public AST {
     public:
     std::shared_ptr<ASTTypeSpec> type_spec;
-    std::shared_ptr<ASTDeclarator> declarator;
+    std::shared_ptr<ASTDeclarator> dtor;
     ASTSimpleDeclaration() : AST() {}
-  };
-
-  class ASTFfi : public AST {
-    public:
-    std::shared_ptr<ASTDeclarator> declarator;
-    ASTFfi() : AST() {}
   };
 
   class ASTCompoundStmt : public AST {
     public:
     std::vector<std::shared_ptr<AST>> items;
-    ASTCompoundStmt() : AST() {
+    Token *op;
+    ASTCompoundStmt(Token *t) : AST(), op(t) {
       items = std::vector<std::shared_ptr<AST>>();
     }
   };
@@ -245,61 +239,75 @@ namespace parser {
     ASTIfStmt(Token *t) : AST(), cond(nullptr), false_stmt(nullptr), op(t) {}
   };
 
-  class ASTLoopStmt : public AST {
+  class ASTWhileStmt : public AST {
     public:
     std::shared_ptr<ASTExpr> cond;
-    std::shared_ptr<ASTCompoundStmt> true_stmt;
+    std::shared_ptr<ASTCompoundStmt> body;
     Token *op;
-    ASTLoopStmt(Token *t) : AST(), cond(nullptr), op(t) {}
+    ASTWhileStmt(Token *t) : AST(), cond(nullptr), op(t) {}
   };
 
-  class ASTFuncDeclarator : public AST {
+  class ASTFnDeclarator : public AST {
     public:
-    std::shared_ptr<ASTDeclarator> declarator;
+    std::shared_ptr<ASTDeclarator> dtor;
+    std::vector<std::shared_ptr<ASTDeclarator>> templates;
     std::vector<std::shared_ptr<ASTSimpleDeclaration>> args;
     Token *op;
-    ASTFuncDeclarator(Token *t) : AST(), op(t) {
+    ASTFnDeclarator(Token *t) : AST(), op(t) {
+      templates = std::vector<std::shared_ptr<ASTDeclarator>>();
       args = std::vector<std::shared_ptr<ASTSimpleDeclaration>>();
     }
   };
 
-  class ASTFuncDeclaration : public AST {
+  class ASTFnDeclaration : public AST {
     public:
-    std::shared_ptr<ASTTypeSpec> type_spec;
-    std::shared_ptr<ASTFuncDeclarator> declarator;
-    ASTFuncDeclaration() : AST() {}
+    std::shared_ptr<ASTTypeSpec> ret_type;
+    std::shared_ptr<ASTFnDeclarator> dtor;
+    ASTFnDeclaration() : AST() {
+      ret_type = nullptr;
+    }
   };
 
-  class ASTFuncDef : public AST {
+  class ASTFnDef : public AST {
     public:
-    std::shared_ptr<ASTFuncDeclaration> declaration;
+    std::shared_ptr<ASTFnDeclaration> dtion;
     std::shared_ptr<ASTCompoundStmt> body;
-    ASTFuncDef() : AST() {}
+    ASTFnDef() : AST() {}
   };
 
-  class ASTStructDef : public AST {
+  class ASTMethodDef : public AST {
     public:
-    std::shared_ptr<ASTDeclarator> declarator;
-    std::vector<std::shared_ptr<ASTSimpleDeclaration>> declarations;
-    ASTStructDef() : AST() {
-      declarations = std::vector<std::shared_ptr<ASTSimpleDeclaration>>();
+    std::shared_ptr<ASTFnDeclaration> dtion;
+    std::shared_ptr<ASTCompoundStmt> body;
+    ASTMethodDef() : AST() {}
+  };
+
+  class ASTStDef : public AST {
+    public:
+    std::shared_ptr<ASTDeclarator> dtor;
+    std::vector<std::shared_ptr<ASTDeclarator>> templates;
+    std::vector<std::shared_ptr<ASTSimpleDeclaration>> dtions;
+    std::vector<std::shared_ptr<ASTMethodDef>> methods;
+    ASTStDef() : AST() {
+      templates = std::vector<std::shared_ptr<ASTDeclarator>>();
+      dtions = std::vector<std::shared_ptr<ASTSimpleDeclaration>>();
     }
   };
 
   class ASTExternalDeclaration : public AST {
     public:
-    std::shared_ptr<ASTTypeSpec> declaration_spec;
-    std::vector<std::shared_ptr<ASTDeclarator>> declarators;
+    std::shared_ptr<ASTTypeSpec> dtion_spec;
+    std::vector<std::shared_ptr<ASTDeclarator>> dtors;
     ASTExternalDeclaration() : AST() {
-      declarators = std::vector<std::shared_ptr<ASTDeclarator>>();
+      dtors = std::vector<std::shared_ptr<ASTDeclarator>>();
     }
   };
 
   class ASTTranslationUnit : public AST {
     public:
-    std::vector<std::shared_ptr<AST>> external_declarations;
+    std::vector<std::shared_ptr<AST>> external_dtions;
     ASTTranslationUnit() : AST() {
-      external_declarations = std::vector<std::shared_ptr<AST>>();
+      external_dtions = std::vector<std::shared_ptr<AST>>();
     }
   };
 

@@ -7,9 +7,7 @@ namespace parser {
       return NULL;
     }
     if ((*next)->sv != str) {
-      if (str == "\n") str = "LF";
-      if ((*next)->sv == "\n") err = PError(str, "LF", *next);
-      else err = PError(str, std::string((*next)->sv), *next);
+      err = PError(str, std::string((*next)->sv), *next);
       return NULL;
     }
     tokenizer::Token *ret = *next;
@@ -50,14 +48,6 @@ namespace parser {
     return ret;
   }
 
-  tokenizer::Token *consume_token_with_indents(tokenizer::Token **next, int indents) {
-    if (!*next) return NULL;
-    if ((*next)->sv.front() != ' ' || (int)(*next)->sv.length() != indents) return NULL;
-    tokenizer::Token *ret = *next;
-    *next = (*next)->next;
-    return ret;
-  }
-
   template <class T> void print_ast_vec(std::vector<std::shared_ptr<T>> &v, int depth) {
     std::cerr << '[';
     if (v.size() == 0) {
@@ -75,6 +65,7 @@ namespace parser {
   }
 
   void print_ast_sub(std::shared_ptr<AST> n, int depth) {
+    if (!n) return;
     if (typeid(*n) == typeid(ASTTypeSpec)) {
       std::shared_ptr<ASTTypeSpec> nn = std::dynamic_pointer_cast<ASTTypeSpec>(n);
       std::cerr << "TypeSpec<" << nn->op->sv << '>';
@@ -92,19 +83,29 @@ namespace parser {
       std::cerr << ')';
       return;
     }
-    if (typeid(*n) == typeid(ASTArrayAccessExpr)) {
-      std::shared_ptr<ASTArrayAccessExpr> nn = std::dynamic_pointer_cast<ASTArrayAccessExpr>(n);
-      std::cerr << "ArrayAccessExpr(p=";
-      print_ast_sub(nn->primary, depth);
+    if (typeid(*n) == typeid(ASTIndexAccessExpr)) {
+      std::shared_ptr<ASTIndexAccessExpr> nn = std::dynamic_pointer_cast<ASTIndexAccessExpr>(n);
+      std::cerr << "IndexAccessExpr(p=";
+      print_ast_sub(nn->p, depth);
       std::cerr << ", e=";
       print_ast_sub(nn->expr, depth);
       std::cerr << ')';
       return;
     }
-    if (typeid(*n) == typeid(ASTFuncCallExpr)) {
-      std::shared_ptr<ASTFuncCallExpr> nn = std::dynamic_pointer_cast<ASTFuncCallExpr>(n);
-      std::cerr << "FuncCallExpr(p=";
-      print_ast_sub(nn->primary, depth);
+    if (typeid(*n) == typeid(ASTStAccessExpr)) {
+      std::shared_ptr<ASTStAccessExpr> nn = std::dynamic_pointer_cast<ASTStAccessExpr>(n);
+      std::cerr << "StAccessExpr<" << nn->op->sv << '>';
+      std::cerr << "(p=";
+      print_ast_sub(nn->p, depth);
+      std::cerr << ')';
+      return;
+    }
+    if (typeid(*n) == typeid(ASTFnCallExpr)) {
+      std::shared_ptr<ASTFnCallExpr> nn = std::dynamic_pointer_cast<ASTFnCallExpr>(n);
+      std::cerr << "FnCallExpr(p=";
+      print_ast_sub(nn->p, depth);
+      std::cerr << ", templates=";
+      print_ast_vec(nn->templates, depth);
       std::cerr << ", args=";
       print_ast_vec(nn->args, depth);
       std::cerr << ')';
@@ -211,7 +212,7 @@ namespace parser {
     }
     if (typeid(*n) == typeid(ASTExprStmt)) {
       std::shared_ptr<ASTExprStmt> nn = std::dynamic_pointer_cast<ASTExprStmt>(n);
-      std::cerr << "ExprStmt(expr=";
+      std::cerr << "ExprStmt(e=";
       print_ast_sub(nn->expr, depth);
       std::cerr << ')';
       return;
@@ -228,7 +229,7 @@ namespace parser {
     }
     if (typeid(*n) == typeid(ASTReturnStmt)) {
       std::shared_ptr<ASTReturnStmt> nn = std::dynamic_pointer_cast<ASTReturnStmt>(n);
-      std::cerr << "ReturnStmt(expr=";
+      std::cerr << "ReturnStmt(e=";
       print_ast_sub(nn->expr, depth);
       std::cerr << ')';
       return;
@@ -241,9 +242,9 @@ namespace parser {
     if (typeid(*n) == typeid(ASTDeclaration)) {
       std::shared_ptr<ASTDeclaration> nn = std::dynamic_pointer_cast<ASTDeclaration>(n);
       std::cerr << "Declaration(ds=";
-      print_ast_sub(nn->declaration_spec, depth);
-      std::cerr << ", d-list=";
-      print_ast_vec(nn->declarators, depth);
+      print_ast_sub(nn->dtion_spec, depth);
+      std::cerr << ", dtors=";
+      print_ast_vec(nn->dtors, depth);
       std::cerr << ')';
       return;
     }
@@ -251,14 +252,14 @@ namespace parser {
       std::shared_ptr<ASTSimpleDeclaration> nn = std::dynamic_pointer_cast<ASTSimpleDeclaration>(n);
       std::cerr << "SimpleDeclaration(ts=";
       print_ast_sub(nn->type_spec, depth);
-      std::cerr << ", d=";
-      print_ast_sub(nn->declarator, depth);
+      std::cerr << ", dtor=";
+      print_ast_sub(nn->dtor, depth);
       std::cerr << ')';
       return;
     }
     if (typeid(*n) == typeid(ASTCompoundStmt)) {
       std::shared_ptr<ASTCompoundStmt> nn = std::dynamic_pointer_cast<ASTCompoundStmt>(n);
-      std::cerr << "CompoundStmt(item-list=";
+      std::cerr << "CompoundStmt(items=";
       print_ast_vec(nn->items, depth);
       std::cerr << ')';
       return;
@@ -294,46 +295,79 @@ namespace parser {
       std::cerr << ')';
       return;
     }
-    if (typeid(*n) == typeid(ASTFuncDeclarator)) {
-      std::shared_ptr<ASTFuncDeclarator> nn = std::dynamic_pointer_cast<ASTFuncDeclarator>(n);
-      std::cerr << "FuncDeclarator(d=";
-      print_ast_sub(nn->declarator, depth);
+    if (typeid(*n) == typeid(ASTWhileStmt)) {
+      std::shared_ptr<ASTWhileStmt> nn = std::dynamic_pointer_cast<ASTWhileStmt>(n);
+      std::cerr << "WhileStmt(cond=";
+      print_ast_sub(nn->cond, depth);
+      std::cerr << ", body=";
+      print_ast_sub(nn->body, depth);
+      std::cerr << ')';
+      return;
+    }
+    if (typeid(*n) == typeid(ASTFnDeclarator)) {
+      std::shared_ptr<ASTFnDeclarator> nn = std::dynamic_pointer_cast<ASTFnDeclarator>(n);
+      std::cerr << "FnDeclarator(fdtor=";
+      print_ast_sub(nn->dtor, depth);
+      std::cerr << ", templates=";
+      print_ast_vec(nn->templates, depth);
       std::cerr << ", args=";
       print_ast_vec(nn->args, depth);
       std::cerr << ')';
       return;
     }
-    if (typeid(*n) == typeid(ASTFuncDeclaration)) {
-      std::shared_ptr<ASTFuncDeclaration> nn = std::dynamic_pointer_cast<ASTFuncDeclaration>(n);
-      std::cerr << "FuncDeclaration(ts=";
-      print_ast_sub(nn->type_spec, depth);
-      std::cerr << ", d=";
-      print_ast_sub(nn->declarator, depth);
+    if (typeid(*n) == typeid(ASTFnDeclaration)) {
+      std::shared_ptr<ASTFnDeclaration> nn = std::dynamic_pointer_cast<ASTFnDeclaration>(n);
+      std::cerr << "FnDeclaration(rt=";
+      print_ast_sub(nn->ret_type, depth);
+      std::cerr << ", dtor=";
+      print_ast_sub(nn->dtor, depth);
       std::cerr << ')';
       return;
     }
-    if (typeid(*n) == typeid(ASTFuncDef)) {
-      std::shared_ptr<ASTFuncDef> nn = std::dynamic_pointer_cast<ASTFuncDef>(n);
-      std::cerr << "FuncDef(d=";
-      print_ast_sub(nn->declaration, depth);
+    if (typeid(*n) == typeid(ASTFnDef)) {
+      std::shared_ptr<ASTFnDef> nn = std::dynamic_pointer_cast<ASTFnDef>(n);
+      std::cerr << "FnDef(dtion=";
+      print_ast_sub(nn->dtion, depth);
       std::cerr << ", body=";
       print_ast_sub(nn->body, depth);
+      std::cerr << ')';
+      return;
+    }
+    if (typeid(*n) == typeid(ASTMethodDef)) {
+      std::shared_ptr<ASTMethodDef> nn = std::dynamic_pointer_cast<ASTMethodDef>(n);
+      std::cerr << "MethodDef(dtion=";
+      print_ast_sub(nn->dtion, depth);
+      std::cerr << ", body=";
+      print_ast_sub(nn->body, depth);
+      std::cerr << ')';
+      return;
+    }
+    if (typeid(*n) == typeid(ASTStDef)) {
+      std::shared_ptr<ASTStDef> nn = std::dynamic_pointer_cast<ASTStDef>(n);
+      std::cerr << "StDef(dtor=";
+      print_ast_sub(nn->dtor, depth);
+      std::cerr << ", templates=";
+      print_ast_vec(nn->templates, depth);
+      std::cerr << ", dtions=";
+      print_ast_vec(nn->dtions, depth);
+      std::cerr << ", methods=";
+      print_ast_vec(nn->methods, depth);
       std::cerr << ')';
       return;
     }
     if (typeid(*n) == typeid(ASTExternalDeclaration)) {
       std::shared_ptr<ASTExternalDeclaration> nn = std::dynamic_pointer_cast<ASTExternalDeclaration>(n);
       std::cerr << "ExternalDeclaration(ds=";
-      print_ast_sub(nn->declaration_spec, depth);
-      std::cerr << ", d-list=";
-      print_ast_vec(nn->declarators, depth);
+      print_ast_sub(nn->dtion_spec, depth);
+      std::cerr << ", dtors=";
+      print_ast_vec(nn->dtors, depth);
       std::cerr << ')';
       return;
     }
     if (typeid(*n) == typeid(ASTTranslationUnit)) {
       std::shared_ptr<ASTTranslationUnit> nn = std::dynamic_pointer_cast<ASTTranslationUnit>(n);
-      std::cerr << "TranslationUnit(ed-list=";
-      print_ast_vec(nn->external_declarations, depth);
+      std::cerr << "TranslationUnit(eds=";
+      print_ast_vec(nn->external_dtions, depth);
       std::cerr << ')';
       return;
     }
